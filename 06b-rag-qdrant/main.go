@@ -106,11 +106,17 @@ func upsert(texts []string, vecs [][]float64) error {
 			"payload": map[string]any{"text": texts[i]},
 		}
 	}
-	body, err := postJSON(qdrant()+"/collections/"+collection+"/points?wait=true", "",
-		map[string]any{"points": points})
+	// 注意：Qdrant 的 upsert 是 PUT /collections/{}/points；
+	// 用 POST 会命中「按 ids 删除/更新」的处理器，报 missing field `ids`
+	buf, _ := json.Marshal(map[string]any{"points": points})
+	req, _ := http.NewRequest("PUT", qdrant()+"/collections/"+collection+"/points?wait=true", bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "\"status\":\"ok\"") {
 		return fmt.Errorf("写入失败: %s", body)
 	}
