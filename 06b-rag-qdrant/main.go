@@ -39,22 +39,37 @@ func embed(texts []string) ([][]float64, error) {
 	if model == "" {
 		model = "text-embedding-3-large"
 	}
-	body, err := postJSON(base+"/embeddings", key, map[string]any{"model": model, "input": texts})
+	body, err := postJSON(base+"/embeddings", key, map[string]any{
+		"model":           model,
+		"input":           texts,
+		"encoding_format": "float", // 有些网关默认返回 base64，显式要 float 数组
+	})
 	if err != nil {
 		return nil, err
 	}
 	var er struct {
 		Data []struct {
 			Embedding []float64 `json:"embedding"`
-			Index     int       `json:"index"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &er); err != nil || len(er.Data) == 0 {
-		return nil, fmt.Errorf("embedding 失败: %s", body)
+	if err := json.Unmarshal(body, &er); err != nil {
+		return nil, fmt.Errorf("embedding 响应解析失败（原始前 300 字）：%.300s", body)
+	}
+	// 按输入顺序取（OpenAI 保证 data 与 input 顺序一致），不依赖 index 字段：
+	// 有些网关不回 index、全默认 0，会导致向量互相覆盖、留下 nil，最终被 Qdrant 拒绝
+	if len(er.Data) != len(texts) {
+		return nil, fmt.Errorf("embedding 数量不对：输入 %d 条，只返回 %d 条（多半是网关截断/限流）；原始前 300 字：%.300s", len(texts), len(er.Data), body)
+	}
+	dim := len(er.Data[0].Embedding)
+	if dim == 0 {
+		return nil, fmt.Errorf("首条 embedding 为空，网关可能没真正返回向量；原始前 300 字：%.300s", body)
 	}
 	vecs := make([][]float64, len(er.Data))
-	for _, d := range er.Data {
-		vecs[d.Index] = d.Embedding
+	for i, d := range er.Data {
+		if len(d.Embedding) != dim {
+			return nil, fmt.Errorf("第 %d 条 embedding 维度 %d ≠ 首条 %d（别混用不同模型/维度）", i, len(d.Embedding), dim)
+		}
+		vecs[i] = d.Embedding
 	}
 	return vecs, nil
 }
