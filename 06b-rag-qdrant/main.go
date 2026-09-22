@@ -151,7 +151,7 @@ func generate(query string, contexts []string) (string, error) {
 	base, key := apiBase()
 	model := os.Getenv("CHAT_MODEL")
 	if model == "" {
-		model = "gpt-4o-mini"
+		model = "gpt-5.4-mini"
 	}
 	var sb strings.Builder
 	for i, c := range contexts {
